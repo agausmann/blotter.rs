@@ -1,22 +1,28 @@
 use declio::ctx::Len;
-use declio::util::{magic_bytes, LittleEndian};
+use declio::util::{magic_bytes, zero_one, LittleEndian};
 use declio::{Decode, Encode};
 use std::convert::TryInto;
-
-const WORLD_SAVE_TYPE: u8 = 1;
-const SUBASSEMBLY_SAVE_TYPE: u8 = 2;
 
 type ComponentId = LittleEndian<u16>;
 type ComponentAddress = LittleEndian<u32>;
 type Int = LittleEndian<i32>;
 type Float = LittleEndian<f32>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Encode, Decode)]
+#[declio(id_type = "u8")]
+enum SaveType {
+    #[declio(id = "1")]
+    World,
+    #[declio(id = "2")]
+    Subassembly,
+}
+
 #[derive(Debug, Encode, Decode)]
 pub struct BlotterFile {
     header: Header,
     save_version: u8,
     game_version: [Int; 4],
-    save_type: u8,
+    save_type: SaveType,
     components_len: Int,
     wires_len: Int,
     component_ids_len: Int,
@@ -54,7 +60,8 @@ struct ComponentIdMapping {
 
 #[derive(Debug, Encode, Decode)]
 struct Input {
-    exclusive: u8,
+    #[declio(with = "zero_one")]
+    exclusive: bool,
     circuit_state_id: Int,
 }
 
@@ -83,7 +90,8 @@ struct Component {
 
 #[derive(Debug, Encode, Decode)]
 struct PegAddress {
-    is_input: u8,
+    #[declio(with = "zero_one")]
+    is_input: bool,
     component: ComponentAddress,
     index: u8,
 }
@@ -97,15 +105,15 @@ struct Wire {
 }
 
 #[derive(Debug, Encode, Decode)]
-#[declio(ctx = "save_type: u8", id_expr = "save_type")]
+#[declio(ctx = "save_type: SaveType", id_expr = "save_type")]
 enum CircuitStates {
-    #[declio(id = "WORLD_SAVE_TYPE")]
+    #[declio(id = "SaveType::World")]
     WorldFormat {
         len: Int,
         #[declio(ctx = "Len(len.0.try_into()?)")]
         circuit_states: Vec<u8>,
     },
-    #[declio(id = "SUBASSEMBLY_SAVE_TYPE")]
+    #[declio(id = "SaveType::Subassembly")]
     SubassemblyFormat {
         len: Int,
         #[declio(ctx = "Len(len.0.try_into()?)")]
