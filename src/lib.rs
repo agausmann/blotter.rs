@@ -39,7 +39,7 @@ pub struct BlotterFile {
 
 magic_bytes! {
     #[derive(Debug)]
-    Header(b"Logic world save");
+    Header(b"Logic World save");
 
     #[derive(Debug)]
     Footer(b"redstone sux lol");
