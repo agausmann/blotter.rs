@@ -7,6 +7,7 @@ type ComponentId = LittleEndian<u16>;
 type ComponentAddress = LittleEndian<u32>;
 type Int = LittleEndian<i32>;
 type Float = LittleEndian<f32>;
+type Version = [Int; 4];
 
 #[derive(Debug, Clone, Copy, PartialEq, Encode, Decode)]
 #[declio(id_type = "u8")]
@@ -21,10 +22,13 @@ enum SaveType {
 pub struct BlotterFile {
     header: Header,
     save_version: u8,
-    game_version: [Int; 4],
+    game_version: Version,
     save_type: SaveType,
     components_len: Int,
     wires_len: Int,
+    mods_len: Int,
+    #[declio(ctx = "Len(mods_len.0.try_into()?)")]
+    mods: Vec<Mod>,
     component_ids_len: Int,
     #[declio(ctx = "Len(component_ids_len.0.try_into()?)")]
     component_ids: Vec<ComponentIdMapping>,
@@ -53,6 +57,12 @@ struct Text {
 }
 
 #[derive(Debug, Encode, Decode)]
+struct Mod {
+    mod_id: Text,
+    version: Version,
+}
+
+#[derive(Debug, Encode, Decode)]
 struct ComponentIdMapping {
     numeric_id: ComponentId,
     text_id: Text,
@@ -60,8 +70,6 @@ struct ComponentIdMapping {
 
 #[derive(Debug, Encode, Decode)]
 struct Input {
-    #[declio(with = "zero_one")]
-    exclusive: bool,
     circuit_state_id: Int,
 }
 
@@ -77,15 +85,24 @@ struct Component {
     type_id: ComponentId,
     position: [Float; 3],
     rotation: [Float; 4],
-    inputs_len: u8,
-    #[declio(ctx = "Len((*inputs_len).try_into()?)")]
+    inputs_len: Int,
+    #[declio(ctx = "Len(inputs_len.0.try_into()?)")]
     inputs: Vec<Input>,
-    outputs_len: u8,
-    #[declio(ctx = "Len((*outputs_len).try_into()?)")]
+    outputs_len: Int,
+    #[declio(ctx = "Len(outputs_len.0.try_into()?)")]
     outputs: Vec<Output>,
     custom_data_len: Int,
-    #[declio(ctx = "Len(custom_data_len.0.try_into()?)")]
+    #[declio(ctx = "Len(len_or_neg1(*custom_data_len)?)")]
     custom_data: Vec<u8>,
+}
+
+fn len_or_neg1(len: Int) -> Result<usize, std::num::TryFromIntError> {
+    // From the spec:
+    // > If the component has no custom data, -1 may be written instead of 0
+    match len.0 {
+        -1 => Ok(0),
+        other => other.try_into(),
+    }
 }
 
 #[derive(Debug, Encode, Decode)]
@@ -93,7 +110,7 @@ struct PegAddress {
     #[declio(with = "zero_one")]
     is_input: bool,
     component: ComponentAddress,
-    index: u8,
+    index: Int,
 }
 
 #[derive(Debug, Encode, Decode)]
