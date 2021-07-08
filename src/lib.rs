@@ -92,17 +92,9 @@ struct Component {
     #[declio(ctx = "Len(outputs_len.0.try_into()?)")]
     outputs: Vec<Output>,
     custom_data_len: Int,
-    #[declio(ctx = "Len(len_or_neg1(*custom_data_len)?)")]
-    custom_data: Vec<u8>,
-}
-
-fn len_or_neg1(len: Int) -> Result<usize, std::num::TryFromIntError> {
-    // From the spec:
-    // > If the component has no custom data, -1 may be written instead of 0
-    match len.0 {
-        -1 => Ok(0),
-        other => other.try_into(),
-    }
+    #[declio(skip_if = "custom_data_len.0 == -1")]
+    #[declio(ctx = "Len(custom_data_len.0.try_into()?)")]
+    custom_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Encode, Decode)]
