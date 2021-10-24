@@ -1,3 +1,5 @@
+use std::io::{Read, Write};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum SaveType {
@@ -62,6 +64,7 @@ enum CircuitStates {
 
 #[derive(Debug)]
 pub struct BlotterFile {
+    save_version: u8,
     game_version: [i32; 4],
     save_type: SaveType,
     mods: Vec<ModInfo>,
@@ -74,6 +77,7 @@ pub struct BlotterFile {
 impl BlotterFile {
     pub fn new(game_version: [i32; 4]) -> Self {
         Self {
+            save_version: 5,
             game_version,
             save_type: SaveType::World,
             mods: Vec::new(),
@@ -88,7 +92,7 @@ impl BlotterFile {
 
     pub fn read<R>(reader: &mut R) -> Result<Self, Error>
     where
-        R: std::io::Read,
+        R: Read,
     {
         read_magic(reader, b"Logic World save")?;
 
@@ -199,6 +203,7 @@ impl BlotterFile {
         read_magic(reader, b"redstone sux lol")?;
 
         Ok(Self {
+            save_version,
             game_version,
             save_type,
             mods,
@@ -207,6 +212,89 @@ impl BlotterFile {
             wires,
             circuit_states,
         })
+    }
+
+    pub fn write<W>(&self, writer: &mut W) -> Result<(), Error>
+    where
+        W: Write,
+    {
+        writer.write_all(b"Logic World save")?;
+
+        write_u8(self.save_version, writer)?;
+        for &v in &self.game_version {
+            write_i32(v, writer)?;
+        }
+        let save_type_id = match self.save_type {
+            SaveType::World => 1,
+            SaveType::Subassembly => 2,
+        };
+        write_u8(save_type_id, writer)?;
+
+        write_usize(self.components.len(), writer)?;
+        write_usize(self.wires.len(), writer)?;
+
+        write_usize(self.mods.len(), writer)?;
+        for mod_info in &self.mods {
+            write_str(&mod_info.mod_id, writer)?;
+            for &v in &mod_info.mod_version {
+                write_i32(v, writer)?;
+            }
+        }
+
+        write_usize(self.component_types.len(), writer)?;
+        for component_type in &self.component_types {
+            write_u16(component_type.numeric_id, writer)?;
+            write_str(&component_type.text_id, writer)?;
+        }
+
+        for component in &self.components {
+            write_u32(component.address, writer)?;
+            write_u32(component.parent, writer)?;
+            write_u16(component.type_id, writer)?;
+            for &v in &component.position {
+                write_f32(v, writer)?;
+            }
+            for &v in &component.rotation {
+                write_f32(v, writer)?;
+            }
+            write_usize(component.inputs.len(), writer)?;
+            for input in &component.inputs {
+                write_i32(input.circuit_state_id, writer)?;
+            }
+            write_usize(component.outputs.len(), writer)?;
+            for output in &component.outputs {
+                write_i32(output.circuit_state_id, writer)?;
+            }
+            if let Some(bytes) = &component.custom_data {
+                write_usize(bytes.len(), writer)?;
+                writer.write_all(&bytes)?;
+            } else {
+                write_i32(-1, writer)?;
+            }
+        }
+
+        for wire in &self.wires {
+            write_peg_address(&wire.start_peg, writer)?;
+            write_peg_address(&wire.end_peg, writer)?;
+            write_i32(wire.circuit_state_id, writer)?;
+            write_f32(wire.rotation, writer)?;
+        }
+
+        match &self.circuit_states {
+            CircuitStates::WorldFormat { circuit_states } => {
+                write_usize(circuit_states.len(), writer)?;
+                writer.write_all(&circuit_states)?;
+            }
+            CircuitStates::SubassemblyFormat { on_states } => {
+                write_usize(on_states.len(), writer)?;
+                for &v in on_states {
+                    write_i32(v, writer)?;
+                }
+            }
+        }
+
+        writer.write_all(b"redstone sux lol")?;
+        Ok(())
     }
 }
 
@@ -227,7 +315,7 @@ impl From<std::io::Error> for Error {
 
 fn read_u8<R>(reader: &mut R) -> Result<u8, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let mut bytes = [0u8; 1];
     reader.read_exact(&mut bytes)?;
@@ -236,7 +324,7 @@ where
 
 fn read_u16<R>(reader: &mut R) -> Result<u16, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let mut bytes = [0u8; 2];
     reader.read_exact(&mut bytes)?;
@@ -245,7 +333,7 @@ where
 
 fn read_i32<R>(reader: &mut R) -> Result<i32, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let mut bytes = [0u8; 4];
     reader.read_exact(&mut bytes)?;
@@ -254,7 +342,7 @@ where
 
 fn read_u32<R>(reader: &mut R) -> Result<u32, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let mut bytes = [0u8; 4];
     reader.read_exact(&mut bytes)?;
@@ -263,7 +351,7 @@ where
 
 fn read_f32<R>(reader: &mut R) -> Result<f32, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let mut bytes = [0u8; 4];
     reader.read_exact(&mut bytes)?;
@@ -272,14 +360,14 @@ where
 
 fn read_usize<R>(reader: &mut R) -> Result<usize, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     read_i32(reader)?.try_into().map_err(|_| Error::InvalidSave)
 }
 
 fn read_string<R>(reader: &mut R) -> Result<String, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let string_len = read_usize(reader)?;
     let bytes = read_bytevec(reader, string_len)?;
@@ -311,7 +399,7 @@ where
 
 fn read_magic<R>(reader: &mut R, magic_bytes: &[u8]) -> Result<(), Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let mut header = [0u8; 16];
     reader.read_exact(&mut header)?;
@@ -323,14 +411,14 @@ where
 
 fn read_version<R>(reader: &mut R) -> Result<[i32; 4], Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     read_array(|| read_i32(reader))
 }
 
 fn read_bytevec<R>(reader: &mut R, len: usize) -> Result<Vec<u8>, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let mut vec = vec![0u8; len];
     reader.read_exact(&mut vec)?;
@@ -339,7 +427,7 @@ where
 
 fn read_peg_address<R>(reader: &mut R) -> Result<PegAddress, Error>
 where
-    R: std::io::Read,
+    R: Read,
 {
     let peg_kind = read_u8(reader)?;
     let is_input = match peg_kind {
@@ -354,4 +442,75 @@ where
         component_address,
         peg_index,
     })
+}
+
+fn write_u8<W>(v: u8, writer: &mut W) -> Result<(), Error>
+where
+    W: Write,
+{
+    writer.write_all(&v.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_u16<W>(v: u16, writer: &mut W) -> Result<(), Error>
+where
+    W: Write,
+{
+    writer.write_all(&v.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_i32<W>(v: i32, writer: &mut W) -> Result<(), Error>
+where
+    W: Write,
+{
+    writer.write_all(&v.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_u32<W>(v: u32, writer: &mut W) -> Result<(), Error>
+where
+    W: Write,
+{
+    writer.write_all(&v.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_f32<W>(v: f32, writer: &mut W) -> Result<(), Error>
+where
+    W: Write,
+{
+    writer.write_all(&v.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_usize<W>(v: usize, writer: &mut W) -> Result<(), Error>
+where
+    W: Write,
+{
+    let v: i32 = v.try_into().map_err(|_| Error::InvalidSave)?;
+    write_i32(v, writer)
+}
+
+fn write_str<W>(s: &str, writer: &mut W) -> Result<(), Error>
+where
+    W: Write,
+{
+    write_usize(s.len(), writer)?;
+    writer.write_all(s.as_bytes())?;
+    Ok(())
+}
+
+fn write_peg_address<W>(address: &PegAddress, writer: &mut W) -> Result<(), Error>
+where
+    W: Write,
+{
+    let peg_type_id = match address.is_input {
+        false => 0,
+        true => 1,
+    };
+    write_u8(peg_type_id, writer)?;
+    write_u32(address.component_address, writer)?;
+    write_i32(address.peg_index, writer)?;
+    Ok(())
 }
