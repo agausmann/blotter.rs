@@ -1,77 +1,76 @@
 use std::io::{Read, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[non_exhaustive]
 pub enum SaveType {
     World,
     Subassembly,
 }
 
 #[derive(Debug)]
-struct ModInfo {
-    mod_id: String,
-    mod_version: [i32; 4],
+pub struct ModInfo {
+    pub mod_id: String,
+    pub mod_version: [i32; 4],
 }
 
 #[derive(Debug)]
-struct ComponentType {
-    numeric_id: u16,
-    text_id: String,
+pub struct ComponentType {
+    pub numeric_id: u16,
+    pub text_id: String,
 }
 
 #[derive(Debug)]
-struct Input {
-    circuit_state_id: i32,
+pub struct Input {
+    pub circuit_state_id: i32,
 }
 
 #[derive(Debug)]
-struct Output {
-    circuit_state_id: i32,
+pub struct Output {
+    pub circuit_state_id: i32,
 }
 
 #[derive(Debug)]
-struct Component {
-    address: u32,
-    parent: u32,
-    type_id: u16,
-    position: [f32; 3],
-    rotation: [f32; 4],
-    inputs: Vec<Input>,
-    outputs: Vec<Output>,
-    custom_data: Option<Vec<u8>>,
+pub struct Component {
+    pub address: u32,
+    pub parent: u32,
+    pub type_id: u16,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub inputs: Vec<Input>,
+    pub outputs: Vec<Output>,
+    pub custom_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug)]
-struct PegAddress {
-    is_input: bool,
-    component_address: u32,
-    peg_index: i32,
+pub struct PegAddress {
+    pub is_input: bool,
+    pub component_address: u32,
+    pub peg_index: i32,
 }
 
 #[derive(Debug)]
-struct Wire {
-    start_peg: PegAddress,
-    end_peg: PegAddress,
-    circuit_state_id: i32,
-    rotation: f32,
+pub struct Wire {
+    pub start_peg: PegAddress,
+    pub end_peg: PegAddress,
+    pub circuit_state_id: i32,
+    pub rotation: f32,
 }
 
 #[derive(Debug)]
-enum CircuitStates {
+pub enum CircuitStates {
     WorldFormat { circuit_states: Vec<u8> },
     SubassemblyFormat { on_states: Vec<i32> },
 }
 
 #[derive(Debug)]
 pub struct BlotterFile {
-    save_version: u8,
-    game_version: [i32; 4],
-    save_type: SaveType,
-    mods: Vec<ModInfo>,
-    component_types: Vec<ComponentType>,
-    components: Vec<Component>,
-    wires: Vec<Wire>,
-    circuit_states: CircuitStates,
+    pub save_version: u8,
+    pub game_version: [i32; 4],
+    pub save_type: SaveType,
+    pub mods: Vec<ModInfo>,
+    pub component_types: Vec<ComponentType>,
+    pub components: Vec<Component>,
+    pub wires: Vec<Wire>,
+    pub circuit_states: CircuitStates,
 }
 
 impl BlotterFile {
@@ -108,7 +107,7 @@ impl BlotterFile {
             1 => SaveType::World,
             2 => SaveType::Subassembly,
             _ => {
-                return Err(Error::UnknownSaveType(save_type_id));
+                return Err(Error::InvalidSave);
             }
         };
 
@@ -280,16 +279,19 @@ impl BlotterFile {
             write_f32(wire.rotation, writer)?;
         }
 
-        match &self.circuit_states {
-            CircuitStates::WorldFormat { circuit_states } => {
+        match (self.save_type, &self.circuit_states) {
+            (SaveType::World, CircuitStates::WorldFormat { circuit_states }) => {
                 write_usize(circuit_states.len(), writer)?;
                 writer.write_all(&circuit_states)?;
             }
-            CircuitStates::SubassemblyFormat { on_states } => {
+            (SaveType::Subassembly, CircuitStates::SubassemblyFormat { on_states }) => {
                 write_usize(on_states.len(), writer)?;
                 for &v in on_states {
                     write_i32(v, writer)?;
                 }
+            }
+            _ => {
+                return Err(Error::InvalidSave);
             }
         }
 
@@ -304,7 +306,6 @@ pub enum Error {
     IoError(std::io::Error),
     InvalidSave,
     IncompatibleVersion(u8),
-    UnknownSaveType(u8),
 }
 
 impl From<std::io::Error> for Error {
