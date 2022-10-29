@@ -1,4 +1,5 @@
 mod convert;
+pub mod custom_data;
 pub mod error;
 pub(crate) mod io;
 pub mod v5;
