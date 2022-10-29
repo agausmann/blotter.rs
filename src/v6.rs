@@ -4,33 +4,10 @@ use std::io::{Read, Write};
 
 pub const SAVE_VERSION: u8 = 6;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SaveType {
-    World,
-    Subassembly,
-}
-
-#[derive(Debug)]
-pub struct ModInfo {
-    pub mod_id: String,
-    pub mod_version: [i32; 4],
-}
-
-#[derive(Debug)]
-pub struct ComponentType {
-    pub numeric_id: u16,
-    pub text_id: String,
-}
-
-#[derive(Debug)]
-pub struct Input {
-    pub circuit_state_id: i32,
-}
-
-#[derive(Debug)]
-pub struct Output {
-    pub circuit_state_id: i32,
-}
+// Unchanged from previous version:
+pub use crate::v5::{
+    CircuitStates, ComponentType, Input, ModInfo, Output, PegAddress, SaveType, Wire,
+};
 
 #[derive(Debug)]
 pub struct Component {
@@ -42,27 +19,6 @@ pub struct Component {
     pub inputs: Vec<Input>,
     pub outputs: Vec<Output>,
     pub custom_data: Option<Vec<u8>>,
-}
-
-#[derive(Debug)]
-pub struct PegAddress {
-    pub is_input: bool,
-    pub component_address: u32,
-    pub peg_index: i32,
-}
-
-#[derive(Debug)]
-pub struct Wire {
-    pub start_peg: PegAddress,
-    pub end_peg: PegAddress,
-    pub circuit_state_id: i32,
-    pub rotation: f32,
-}
-
-#[derive(Debug)]
-pub enum CircuitStates {
-    WorldFormat { circuit_states: Vec<u8> },
-    SubassemblyFormat { on_states: Vec<i32> },
 }
 
 #[derive(Debug)]
