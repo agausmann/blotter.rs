@@ -10,6 +10,8 @@ use std::io::{Read, Write};
 use crate::error::Error;
 use crate::io::read_magic;
 
+pub use v6 as latest;
+
 #[derive(Debug)]
 pub enum BlotterFile {
     V5(v5::BlotterFile),
@@ -31,6 +33,14 @@ impl BlotterFile {
         match self {
             Self::V5(file) => file.write(writer),
             Self::V6(file) => file.write(writer),
+        }
+    }
+
+    /// Convert the file into the latest version.
+    pub fn migrate(self) -> latest::BlotterFile {
+        match self {
+            Self::V5(file) => Self::V6(file.into()).migrate(),
+            Self::V6(file) => file,
         }
     }
 }
