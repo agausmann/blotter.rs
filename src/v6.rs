@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::io::*;
 use std::io::{Read, Write};
 
-pub const SAVE_VERSION: u8 = 5;
+pub const SAVE_VERSION: u8 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SaveType {
@@ -37,7 +37,7 @@ pub struct Component {
     pub address: u32,
     pub parent: u32,
     pub type_id: u16,
-    pub position: [f32; 3],
+    pub position: [i32; 3],
     pub rotation: [f32; 4],
     pub inputs: Vec<Input>,
     pub outputs: Vec<Output>,
@@ -140,7 +140,7 @@ impl BlotterFile {
             let address = read_u32(reader)?;
             let parent = read_u32(reader)?;
             let type_id = read_u16(reader)?;
-            let position = read_array(|| read_f32(reader))?;
+            let position = read_array(|| read_i32(reader))?;
             let rotation = read_array(|| read_f32(reader))?;
 
             let num_inputs = read_usize(reader)?;
@@ -249,7 +249,7 @@ impl BlotterFile {
             write_u32(component.parent, writer)?;
             write_u16(component.type_id, writer)?;
             for &v in &component.position {
-                write_f32(v, writer)?;
+                write_i32(v, writer)?;
             }
             for &v in &component.rotation {
                 write_f32(v, writer)?;
