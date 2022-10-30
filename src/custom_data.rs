@@ -44,3 +44,25 @@ impl ComponentData for CircuitBoard {
         Ok(())
     }
 }
+
+#[derive(Debug)]
+pub struct Delayer {
+    pub timer: u32,
+    pub delay: u32,
+}
+
+impl ComponentData for Delayer {
+    const TYPE_STRING: &'static str = "MHG.Delayer";
+
+    fn read<R: Read>(reader: &mut R) -> Result<Self, Error> {
+        let timer = ReadFrom::read_from(reader)?;
+        let delay = ReadFrom::read_from(reader)?;
+        Ok(Self { timer, delay })
+    }
+
+    fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        self.timer.write_to(writer)?;
+        self.delay.write_to(writer)?;
+        Ok(())
+    }
+}
