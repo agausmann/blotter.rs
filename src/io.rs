@@ -1,103 +1,111 @@
 use crate::error::Error;
-use std::io::{Read, Write};
+use std::{
+    io::{Read, Write},
+    iter::repeat_with,
+};
 
-pub fn read_u8<R: Read>(reader: &mut R) -> Result<u8, Error> {
-    let mut bytes = [0u8; 1];
-    reader.read_exact(&mut bytes)?;
-    Ok(u8::from_le_bytes(bytes))
+pub trait ReadFrom: Sized {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error>;
 }
 
-pub fn write_u8<W: Write>(v: u8, writer: &mut W) -> Result<(), Error> {
-    writer.write_all(&v.to_le_bytes())?;
-    Ok(())
+pub trait ReadFromSeed<Seed>: Sized {
+    fn read_from_seed<R: Read>(reader: &mut R, seed: Seed) -> Result<Self, Error>;
 }
 
-pub fn read_u16<R: Read>(reader: &mut R) -> Result<u16, Error> {
-    let mut bytes = [0u8; 2];
-    reader.read_exact(&mut bytes)?;
-    Ok(u16::from_le_bytes(bytes))
-}
-
-pub fn write_u16<W: Write>(v: u16, writer: &mut W) -> Result<(), Error> {
-    writer.write_all(&v.to_le_bytes())?;
-    Ok(())
-}
-
-pub fn read_i32<R: Read>(reader: &mut R) -> Result<i32, Error> {
-    let mut bytes = [0u8; 4];
-    reader.read_exact(&mut bytes)?;
-    Ok(i32::from_le_bytes(bytes))
-}
-
-pub fn write_i32<W: Write>(v: i32, writer: &mut W) -> Result<(), Error> {
-    writer.write_all(&v.to_le_bytes())?;
-    Ok(())
-}
-
-pub fn read_u32<R: Read>(reader: &mut R) -> Result<u32, Error> {
-    let mut bytes = [0u8; 4];
-    reader.read_exact(&mut bytes)?;
-    Ok(u32::from_le_bytes(bytes))
-}
-
-pub fn write_u32<W: Write>(v: u32, writer: &mut W) -> Result<(), Error> {
-    writer.write_all(&v.to_le_bytes())?;
-    Ok(())
-}
-
-pub fn read_f32<R: Read>(reader: &mut R) -> Result<f32, Error> {
-    let mut bytes = [0u8; 4];
-    reader.read_exact(&mut bytes)?;
-    Ok(f32::from_le_bytes(bytes))
-}
-
-pub fn write_f32<W: Write>(v: f32, writer: &mut W) -> Result<(), Error> {
-    writer.write_all(&v.to_le_bytes())?;
-    Ok(())
-}
-
-pub fn read_usize<R: Read>(reader: &mut R) -> Result<usize, Error> {
-    read_i32(reader)?.try_into().map_err(|_| Error::InvalidSave)
-}
-
-pub fn write_usize<W: Write>(v: usize, writer: &mut W) -> Result<(), Error> {
-    let v: i32 = v.try_into().map_err(|_| Error::InvalidSave)?;
-    write_i32(v, writer)
-}
-
-pub fn read_string<R: Read>(reader: &mut R) -> Result<String, Error> {
-    let string_len = read_usize(reader)?;
-    let bytes = read_bytevec(reader, string_len)?;
-    String::from_utf8(bytes).map_err(|_| Error::InvalidSave)
-}
-
-pub fn write_str<W: Write>(s: &str, writer: &mut W) -> Result<(), Error> {
-    write_usize(s.len(), writer)?;
-    writer.write_all(s.as_bytes())?;
-    Ok(())
-}
-
-pub fn read_vec<F, T>(len: usize, mut reader: F) -> Result<Vec<T>, Error>
-where
-    F: FnMut() -> Result<T, Error>,
-{
-    let mut vec = Vec::with_capacity(len);
-    for _ in 0..len {
-        vec.push(reader()?);
+impl<T: ReadFrom> ReadFromSeed<()> for T {
+    fn read_from_seed<R: Read>(reader: &mut R, seed: ()) -> Result<Self, Error> {
+        let _ = seed;
+        Self::read_from(reader)
     }
-    Ok(vec)
 }
 
-pub fn read_array<F, T, const LEN: usize>(mut reader: F) -> Result<[T; LEN], Error>
-where
-    F: FnMut() -> Result<T, Error>,
-    T: Default + Copy,
-{
-    let mut arr = [Default::default(); LEN];
-    for slot in &mut arr {
-        *slot = reader()?;
+pub trait WriteTo {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error>;
+}
+
+macro_rules! primitive_io {
+    ($($t:ty: $len:literal,)*) => {$(
+        impl ReadFrom for $t {
+            fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+                let mut bytes = [0u8; $len];
+                reader.read_exact(&mut bytes)?;
+                Ok(<$t>::from_le_bytes(bytes))
+            }
+        }
+
+        impl WriteTo for $t {
+            fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+                writer.write_all(&self.to_le_bytes())?;
+                Ok(())
+            }
+        }
+    )*};
+}
+
+primitive_io! {
+    u8: 1,
+    u16: 2,
+    i32: 4,
+    u32: 4,
+    f32: 4,
+}
+
+impl ReadFrom for usize {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+        i32::read_from(reader).and_then(|x| Self::try_from(x).map_err(|_| Error::InvalidSave))
     }
-    Ok(arr)
+}
+
+impl WriteTo for usize {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        i32::try_from(*self)
+            .map_err(|_| Error::InvalidSave)
+            .and_then(|x| x.write_to(writer))
+    }
+}
+
+pub struct Length(pub usize);
+
+impl<T: ReadFrom> ReadFromSeed<Length> for Vec<T> {
+    fn read_from_seed<R: Read>(reader: &mut R, seed: Length) -> Result<Self, Error> {
+        repeat_with(|| T::read_from(reader)).take(seed.0).collect()
+    }
+}
+
+impl<T: ReadFrom + Default + Copy, const N: usize> ReadFrom for [T; N] {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+        let mut arr = [Default::default(); N];
+        for slot in &mut arr {
+            *slot = T::read_from(reader)?;
+        }
+        Ok(arr)
+    }
+}
+
+impl<T: WriteTo> WriteTo for [T] {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        for x in self {
+            x.write_to(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl ReadFrom for String {
+    fn read_from<R: Read>(reader: &mut R) -> Result<Self, Error> {
+        let string_len = usize::read_from(reader)?;
+        let mut bytes = vec![0u8; string_len];
+        reader.read_exact(&mut bytes)?;
+        String::from_utf8(bytes).map_err(|_| Error::InvalidSave)
+    }
+}
+
+impl WriteTo for str {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        self.len().write_to(writer)?;
+        writer.write_all(self.as_bytes())?;
+        Ok(())
+    }
 }
 
 pub fn read_magic<R: Read>(reader: &mut R, magic_bytes: &[u8]) -> Result<(), Error> {
@@ -107,14 +115,4 @@ pub fn read_magic<R: Read>(reader: &mut R, magic_bytes: &[u8]) -> Result<(), Err
         return Err(Error::InvalidSave);
     }
     Ok(())
-}
-
-pub fn read_version<R: Read>(reader: &mut R) -> Result<[i32; 4], Error> {
-    read_array(|| read_i32(reader))
-}
-
-pub fn read_bytevec<R: Read>(reader: &mut R, len: usize) -> Result<Vec<u8>, Error> {
-    let mut vec = vec![0u8; len];
-    reader.read_exact(&mut vec)?;
-    Ok(vec)
 }

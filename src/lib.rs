@@ -5,11 +5,10 @@ pub(crate) mod io;
 pub mod v5;
 pub mod v6;
 
-use io::read_u8;
 use std::io::{Read, Write};
 
 use crate::error::Error;
-use crate::io::read_magic;
+use crate::io::{read_magic, ReadFrom};
 
 pub use v6 as latest;
 
@@ -21,8 +20,8 @@ pub enum BlotterFile {
 
 impl BlotterFile {
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, Error> {
-        read_magic(reader, b"Logic World save")?;
-        let save_version = read_u8(reader)?;
+        read_magic(reader, latest::SAVE_HEADER)?;
+        let save_version = u8::read_from(reader)?;
         match save_version {
             v5::SAVE_VERSION => v5::BlotterFile::read_after_save_version(reader).map(Self::V5),
             v6::SAVE_VERSION => v6::BlotterFile::read_after_save_version(reader).map(Self::V6),

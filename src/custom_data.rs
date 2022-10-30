@@ -27,9 +27,9 @@ impl ComponentData for CircuitBoard {
     const TYPE_STRING: &'static str = "MHG.CircuitBoard";
 
     fn read<R: Read>(reader: &mut R) -> Result<Self, Error> {
-        let color = read_array(|| read_u8(reader))?;
-        let size_x = read_u32(reader)?;
-        let size_z = read_u32(reader)?;
+        let color = ReadFrom::read_from(reader)?;
+        let size_x = ReadFrom::read_from(reader)?;
+        let size_z = ReadFrom::read_from(reader)?;
         Ok(Self {
             color,
             size_x,
@@ -38,11 +38,9 @@ impl ComponentData for CircuitBoard {
     }
 
     fn write<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
-        for x in self.color {
-            write_u8(x, writer)?;
-        }
-        write_u32(self.size_x, writer)?;
-        write_u32(self.size_z, writer)?;
+        self.color.write_to(writer)?;
+        self.size_x.write_to(writer)?;
+        self.size_z.write_to(writer)?;
         Ok(())
     }
 }
