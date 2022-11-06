@@ -26,17 +26,22 @@ pub struct Sandbox {
 impl Sandbox {
     /// Create a new, empty sandbox level.
     pub fn new() -> Self {
+        Self::with_meta_info(default_component_types_map(), Vec::new())
+    }
+
+    /// Create an empty sandbox level with custom component-type / mod info.
+    fn with_meta_info(component_types: HashMap<String, u16>, mods: Vec<ModInfo>) -> Self {
         Self {
             next_component: 1,
             next_cluster: 0,
             next_wire: 0,
-            next_type: 0,
+            next_type: component_types.values().copied().max().unwrap_or(0),
             root_components: HashSet::new(),
             components: HashMap::new(),
             wires: HashMap::new(),
             clusters: HashMap::new(),
-            component_types: default_component_types_map(),
-            mods: Vec::new(),
+            component_types,
+            mods,
         }
     }
 
@@ -61,46 +66,95 @@ impl Sandbox {
             .collect(),
             custom_data: component.custom_data.clone(),
         };
-
         let id = ComponentId(NonZeroU32::new(self.next_component).unwrap());
-        self.next_component += 1;
+        self.insert_component(id, info);
+        id
+    }
 
-        self.components.insert(id, info);
-        if let Some(parent) = component.parent {
+    /// Internal logic of `add_component` that is shared with savefile loading.
+    /// Savefiles store the component and cluster IDs, so they can be directly
+    /// passed instead of being allocated (as is done by `add_component`).
+    fn insert_component(&mut self, id: ComponentId, info: ComponentInfo) {
+        // TODO bubble this error (could be triggered by an invalid savefile).
+        assert!(!self.components.contains_key(&id));
+
+        // Update component ID allocator.
+        // TODO make this less sparse, 2 billion is not very much to work with
+        // over the lifetime of a world.
+        self.next_component = self.next_component.max(id.into_raw() + 1);
+
+        // Add parent-child cross-reference.
+        if let Some(parent) = info.parent {
+            // Valid savefiles will store and load the parent before the child,
+            // so it is reasonable to assume the parent exists here.
+            //TODO bubble this error; it should be recoverable in file loading.
             self.components
                 .get_mut(&parent)
                 .unwrap()
                 .children
                 .insert(id);
+        } else {
+            self.root_components.insert(id);
         }
 
-        id
+        // Add component info.
+        self.components.insert(id, info);
     }
 
     pub fn add_wire(
         &mut self,
         addr_a: PegAddress,
         addr_b: PegAddress,
+        rotation: f32,
+    ) -> Result<WireId, AddWireError> {
+        self.insert_wire(addr_a, addr_b, rotation, None)
+    }
+
+    /// Like the `add_component` / `insert_component` duality, this has logic
+    /// shared between `add_wire` and savefile loading. Unlike
+    /// `insert_component`, this does allocate the wire ID automatically,
+    /// because the save file doesn't use wire IDs.
+    fn insert_wire(
+        &mut self,
+        addr_a: PegAddress,
+        addr_b: PegAddress,
+        rotation: f32,
+        cluster_id: Option<ClusterId>,
     ) -> Result<WireId, AddWireError> {
         // It is illegal to directly connect output pegs.
         if addr_a.peg_type == PegType::Output && addr_b.peg_type == PegType::Output {
             return Err(AddWireError::InvalidPegAddress)?;
         }
 
-        // If there is already a wire connecting these pegs, nothing needs to be
-        // done.
         let peg_a = self
             .get_peg(&addr_a)
             .ok_or(AddWireError::InvalidPegAddress)?;
         let peg_b = self
             .get_peg(&addr_b)
             .ok_or(AddWireError::InvalidPegAddress)?;
+        // If there is already a wire connecting these pegs, nothing needs to be
+        // done.
         if let Some(&wire_id) = peg_a.wires.intersection(&peg_b.wires).next() {
             return Ok(wire_id);
         }
 
-        // Ensure both pegs have the same cluster.
-        let cluster_id = self.merge_clusters(peg_a.cluster_id, peg_b.cluster_id);
+        let cluster_id = match cluster_id {
+            Some(id) => {
+                // If cluster ID is specified (i.e. from an existing savefile),
+                // check savefile validity: ensure that both endpoints and the
+                // wire all have the same cluster.
+
+                //TODO bubble this error
+                assert!(id == peg_a.cluster_id && id == peg_b.cluster_id);
+
+                id
+            }
+            None => {
+                // If no cluster ID is given (i.e. caller is `add_wire`), then
+                // obtain one from merging the two endpoints.
+                self.merge_clusters(peg_a.cluster_id, peg_b.cluster_id)
+            }
+        };
 
         // Create wire.
         let wire_id = WireId(self.next_wire);
@@ -111,7 +165,7 @@ impl Sandbox {
                 a: addr_a,
                 b: addr_b,
                 cluster_id,
-                rotation: 0.0,
+                rotation,
             },
         );
 
@@ -265,38 +319,47 @@ impl<'a> ComponentBuilder<'a> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentId(NonZeroU32);
 
 impl ComponentId {
     fn into_raw(self) -> u32 {
         self.0.into()
     }
+
+    fn from_raw(raw: u32) -> Option<Self> {
+        NonZeroU32::new(raw).map(Self)
+    }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClusterId(u32);
 
 impl ClusterId {
     fn into_raw(self) -> i32 {
         self.0.try_into().unwrap()
     }
+
+    fn from_raw(raw: i32) -> Self {
+        Self(raw.try_into().unwrap())
+    }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WireId(u32);
 
+#[derive(Debug)]
 pub enum AddWireError {
     InvalidPegAddress,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PegType {
     Input,
     Output,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PegAddress {
     pub component: ComponentId,
     pub peg_type: PegType,

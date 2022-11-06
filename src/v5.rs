@@ -197,7 +197,7 @@ impl WriteTo for Component {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum PegType {
     Output,
     Input,
@@ -225,7 +225,7 @@ impl WriteTo for PegType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct PegAddress {
     pub peg_type: PegType,
     pub component_address: u32,
