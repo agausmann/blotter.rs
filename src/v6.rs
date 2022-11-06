@@ -6,8 +6,8 @@ pub const SAVE_VERSION: u8 = 6;
 
 // Unchanged from previous version:
 pub use crate::v5::{
-    CircuitStates, ComponentType, Input, ModInfo, Output, PegAddress, SaveType, Wire, SAVE_FOOTER,
-    SAVE_HEADER,
+    CircuitStates, ComponentType, Input, ModInfo, Output, PegAddress, PegType, SaveType, Wire,
+    SAVE_FOOTER, SAVE_HEADER,
 };
 
 #[derive(Debug)]
