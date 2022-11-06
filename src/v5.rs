@@ -34,7 +34,7 @@ impl WriteTo for SaveType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModInfo {
     pub mod_id: String,
     pub mod_version: [i32; 4],

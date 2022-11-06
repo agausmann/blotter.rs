@@ -1,6 +1,8 @@
 //! High-level API for constructing and modifying a "Sandbox" / World.
 
-use crate::latest as blotter;
+mod serialize;
+
+use crate::latest::ModInfo;
 use std::{
     collections::{HashMap, HashSet},
     iter::repeat_with,
@@ -18,7 +20,7 @@ pub struct Sandbox {
     wires: HashMap<WireId, WireInfo>,
     clusters: HashMap<ClusterId, ClusterInfo>,
     component_types: HashMap<String, u16>,
-    mods: Vec<blotter::ModInfo>,
+    mods: Vec<ModInfo>,
 }
 
 impl Sandbox {
