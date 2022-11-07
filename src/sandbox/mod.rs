@@ -192,13 +192,26 @@ impl Sandbox {
     }
 
     pub fn remove_wire(&mut self, id: WireId) {
-        // TODO Remove wire-cluster cross-reference.
+        // Remove wire.
+        let wire = match self.wires.remove(&id) {
+            Some(x) => x,
+            None => {
+                // If wire doesn't exist, nothing needs to be done.
+                return;
+            }
+        };
 
-        // TODO Remove wire.
+        // Remove wire-cluster and wire-peg cross-references.
+        self.clusters
+            .get_mut(&wire.cluster_id)
+            .unwrap()
+            .wires
+            .remove(&id);
+        self.get_peg_mut(&wire.a).unwrap().wires.remove(&id);
+        self.get_peg_mut(&wire.b).unwrap().wires.remove(&id);
 
-        // TODO Split cluster if necessary.
-
-        todo!()
+        // Split cluster if necessary.
+        self.check_split(&wire.a, &wire.b);
     }
 
     fn get_component_type(&mut self, id: &str) -> u16 {
@@ -249,6 +262,50 @@ impl Sandbox {
         dest.wires.extend(src.wires);
 
         id_dest
+    }
+
+    fn check_split(&mut self, addr_a: &PegAddress, addr_b: &PegAddress) {
+        // Traverse the whole cluster connected to addr_a.
+        // If addr_b is in that set, then they are connected.
+        // If not, a new cluster needs to be created.
+
+        let mut frontier = Vec::new();
+        let mut visited_pegs = HashSet::new();
+        let mut visited_wires = HashSet::new();
+        frontier.push(*addr_a);
+        visited_pegs.insert(*addr_a);
+
+        while let Some(peg_addr) = frontier.pop() {
+            for wire_id in &self.get_peg(&peg_addr).unwrap().wires {
+                let wire = &self.wires[wire_id];
+                let neighbor = if peg_addr == wire.a {
+                    wire.b
+                } else if peg_addr == wire.b {
+                    wire.a
+                } else {
+                    unreachable!("invalid xref between unrelated wire and peg");
+                };
+                visited_wires.insert(*wire_id);
+                if visited_pegs.insert(neighbor) {
+                    frontier.push(neighbor);
+                }
+            }
+        }
+
+        if visited_pegs.contains(&addr_b) {
+            // Still connected; nothing to do.
+            return;
+        }
+
+        // B is not connected to A; make a new cluster and update all the
+        // pegs and wires found connected to A.
+        let cluster_id = self.make_cluster();
+        for peg_addr in visited_pegs {
+            self.get_peg_mut(&peg_addr).unwrap().cluster_id = cluster_id;
+        }
+        for wire_id in visited_wires {
+            self.wires.get_mut(&wire_id).unwrap().cluster_id = cluster_id;
+        }
     }
 
     fn get_peg(&self, addr: &PegAddress) -> Option<&PegInfo> {
