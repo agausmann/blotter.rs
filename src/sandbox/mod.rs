@@ -12,13 +12,13 @@ use std::{
 /// An in-memory representation of a Sandbox that is easy to modify.
 pub struct Sandbox {
     next_component: u32,
-    next_cluster: u32,
+    next_net: u32,
     next_wire: u32,
     next_type: u16,
     root_components: HashSet<ComponentId>,
     components: HashMap<ComponentId, ComponentInfo>,
     wires: HashMap<WireId, WireInfo>,
-    clusters: HashMap<ClusterId, ClusterInfo>,
+    nets: HashMap<NetId, NetInfo>,
     component_types: HashMap<String, u16>,
     mods: Vec<ModInfo>,
 }
@@ -33,13 +33,13 @@ impl Sandbox {
     fn with_meta_info(component_types: HashMap<String, u16>, mods: Vec<ModInfo>) -> Self {
         Self {
             next_component: 1,
-            next_cluster: 0,
+            next_net: 0,
             next_wire: 0,
             next_type: component_types.values().copied().max().unwrap_or(0),
             root_components: HashSet::new(),
             components: HashMap::new(),
             wires: HashMap::new(),
-            clusters: HashMap::new(),
+            nets: HashMap::new(),
             component_types,
             mods,
         }
@@ -53,13 +53,13 @@ impl Sandbox {
             rotation: component.rotation,
             children: HashSet::new(),
             inputs: repeat_with(|| PegInfo {
-                cluster_id: self.make_cluster(),
+                net_id: self.make_net(),
                 wires: HashSet::new(),
             })
             .take(component.num_inputs as usize)
             .collect(),
             outputs: repeat_with(|| PegInfo {
-                cluster_id: self.make_cluster(),
+                net_id: self.make_net(),
                 wires: HashSet::new(),
             })
             .take(component.num_outputs as usize)
@@ -72,7 +72,7 @@ impl Sandbox {
     }
 
     /// Internal logic of `add_component` that is shared with savefile loading.
-    /// Savefiles store the component and cluster IDs, so they can be directly
+    /// Savefiles store the component and net IDs, so they can be directly
     /// passed instead of being allocated (as is done by `add_component`).
     fn insert_component(&mut self, id: ComponentId, info: ComponentInfo) {
         // TODO bubble this error (could be triggered by an invalid savefile).
@@ -119,7 +119,7 @@ impl Sandbox {
         addr_a: PegAddress,
         addr_b: PegAddress,
         rotation: f32,
-        cluster_id: Option<ClusterId>,
+        net_id: Option<NetId>,
     ) -> Result<WireId, AddWireError> {
         // It is illegal to directly connect output pegs.
         if addr_a.peg_type == PegType::Output && addr_b.peg_type == PegType::Output {
@@ -138,21 +138,21 @@ impl Sandbox {
             return Ok(wire_id);
         }
 
-        let cluster_id = match cluster_id {
+        let net_id = match net_id {
             Some(id) => {
-                // If cluster ID is specified (i.e. from an existing savefile),
+                // If net ID is specified (i.e. from an existing savefile),
                 // check savefile validity: ensure that both endpoints and the
-                // wire all have the same cluster.
+                // wire all have the same net.
 
                 //TODO bubble this error
-                assert!(id == peg_a.cluster_id && id == peg_b.cluster_id);
+                assert!(id == peg_a.net_id && id == peg_b.net_id);
 
                 id
             }
             None => {
-                // If no cluster ID is given (i.e. caller is `add_wire`), then
+                // If no net ID is given (i.e. caller is `add_wire`), then
                 // obtain one from merging the two endpoints.
-                self.merge_clusters(peg_a.cluster_id, peg_b.cluster_id)
+                self.merge_nets(peg_a.net_id, peg_b.net_id)
             }
         };
 
@@ -164,19 +164,15 @@ impl Sandbox {
             WireInfo {
                 a: addr_a,
                 b: addr_b,
-                cluster_id,
+                net_id,
                 rotation,
             },
         );
 
-        // Register wire references in pegs and cluster.
+        // Register wire references in pegs and net.
         self.get_peg_mut(&addr_a).unwrap().wires.insert(wire_id);
         self.get_peg_mut(&addr_b).unwrap().wires.insert(wire_id);
-        self.clusters
-            .get_mut(&cluster_id)
-            .unwrap()
-            .wires
-            .insert(wire_id);
+        self.nets.get_mut(&net_id).unwrap().wires.insert(wire_id);
 
         Ok(wire_id)
     }
@@ -186,7 +182,7 @@ impl Sandbox {
 
         // TODO Remove component.
 
-        // TODO Remove peg-cluster cross-references. Remove clusters if empty.
+        // TODO Remove peg-net cross-references. Remove nets if empty.
 
         todo!()
     }
@@ -201,16 +197,12 @@ impl Sandbox {
             }
         };
 
-        // Remove wire-cluster and wire-peg cross-references.
-        self.clusters
-            .get_mut(&wire.cluster_id)
-            .unwrap()
-            .wires
-            .remove(&id);
+        // Remove wire-net and wire-peg cross-references.
+        self.nets.get_mut(&wire.net_id).unwrap().wires.remove(&id);
         self.get_peg_mut(&wire.a).unwrap().wires.remove(&id);
         self.get_peg_mut(&wire.b).unwrap().wires.remove(&id);
 
-        // Split cluster if necessary.
+        // Split net if necessary.
         self.check_split(&wire.a, &wire.b);
     }
 
@@ -226,38 +218,38 @@ impl Sandbox {
         }
     }
 
-    fn make_cluster(&mut self) -> ClusterId {
-        let id = ClusterId(self.next_cluster);
-        self.next_cluster += 1;
+    fn make_net(&mut self) -> NetId {
+        let id = NetId(self.next_net);
+        self.next_net += 1;
         id
     }
 
-    fn merge_clusters(&mut self, id_a: ClusterId, id_b: ClusterId) -> ClusterId {
-        // Nothing needs to be done if the two clusters are the same.
+    fn merge_nets(&mut self, id_a: NetId, id_b: NetId) -> NetId {
+        // Nothing needs to be done if the two nets are the same.
         if id_a == id_b {
             return id_a;
         }
 
-        let a = &self.clusters[&id_a];
-        let b = &self.clusters[&id_b];
-        // Merge the smaller cluster into the larger cluster.
+        let a = &self.nets[&id_a];
+        let b = &self.nets[&id_b];
+        // Merge the smaller net into the larger net.
         let (id_dest, id_src) = if a.size() >= b.size() {
             (id_a, id_b)
         } else {
             (id_b, id_a)
         };
 
-        let src = self.clusters.remove(&id_src).unwrap();
-        // Update cluster cross-references:
+        let src = self.nets.remove(&id_src).unwrap();
+        // Update net cross-references:
         for wire_id in &src.wires {
-            self.wires.get_mut(wire_id).unwrap().cluster_id = id_dest;
+            self.wires.get_mut(wire_id).unwrap().net_id = id_dest;
         }
         for peg_id in &src.pegs {
-            self.get_peg_mut(peg_id).unwrap().cluster_id = id_dest;
+            self.get_peg_mut(peg_id).unwrap().net_id = id_dest;
         }
 
         // Move references from src into dest:
-        let dest = self.clusters.get_mut(&id_dest).unwrap();
+        let dest = self.nets.get_mut(&id_dest).unwrap();
         dest.pegs.extend(src.pegs);
         dest.wires.extend(src.wires);
 
@@ -265,9 +257,9 @@ impl Sandbox {
     }
 
     fn check_split(&mut self, addr_a: &PegAddress, addr_b: &PegAddress) {
-        // Traverse the whole cluster connected to addr_a.
+        // Traverse the whole net connected to addr_a.
         // If addr_b is in that set, then they are connected.
-        // If not, a new cluster needs to be created.
+        // If not, a new net needs to be created.
 
         let mut frontier = Vec::new();
         let mut visited_pegs = HashSet::new();
@@ -297,14 +289,14 @@ impl Sandbox {
             return;
         }
 
-        // B is not connected to A; make a new cluster and update all the
+        // B is not connected to A; make a new net and update all the
         // pegs and wires found connected to A.
-        let cluster_id = self.make_cluster();
+        let net_id = self.make_net();
         for peg_addr in visited_pegs {
-            self.get_peg_mut(&peg_addr).unwrap().cluster_id = cluster_id;
+            self.get_peg_mut(&peg_addr).unwrap().net_id = net_id;
         }
         for wire_id in visited_wires {
-            self.wires.get_mut(&wire_id).unwrap().cluster_id = cluster_id;
+            self.wires.get_mut(&wire_id).unwrap().net_id = net_id;
         }
     }
 
@@ -390,9 +382,9 @@ impl ComponentId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ClusterId(u32);
+pub struct NetId(u32);
 
-impl ClusterId {
+impl NetId {
     fn into_raw(self) -> i32 {
         self.0.try_into().unwrap()
     }
@@ -451,7 +443,7 @@ impl ComponentInfo {
 }
 
 struct PegInfo {
-    cluster_id: ClusterId,
+    net_id: NetId,
     wires: HashSet<WireId>,
 }
 
@@ -459,16 +451,16 @@ struct PegInfo {
 struct WireInfo {
     a: PegAddress,
     b: PegAddress,
-    cluster_id: ClusterId,
+    net_id: NetId,
     rotation: f32,
 }
 
-struct ClusterInfo {
+struct NetInfo {
     wires: HashSet<WireId>,
     pegs: HashSet<PegAddress>,
 }
 
-impl ClusterInfo {
+impl NetInfo {
     fn size(&self) -> usize {
         self.wires.len() + self.pegs.len()
     }

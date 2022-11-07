@@ -67,7 +67,7 @@ impl From<&blotter::BlotterFile> for super::Sandbox {
                     wire.start_peg.into(),
                     wire.end_peg.into(),
                     wire.rotation,
-                    Some(super::ClusterId::from_raw(wire.circuit_state_id)),
+                    Some(super::NetId::from_raw(wire.circuit_state_id)),
                 )
                 .unwrap();
         }
@@ -117,7 +117,7 @@ impl From<&blotter::Component> for (super::ComponentId, super::ComponentInfo) {
 impl From<&super::PegInfo> for blotter::Input {
     fn from(peg: &super::PegInfo) -> Self {
         Self {
-            circuit_state_id: peg.cluster_id.into_raw(),
+            circuit_state_id: peg.net_id.into_raw(),
         }
     }
 }
@@ -125,7 +125,7 @@ impl From<&super::PegInfo> for blotter::Input {
 impl From<&blotter::Input> for super::PegInfo {
     fn from(input: &blotter::Input) -> Self {
         Self {
-            cluster_id: super::ClusterId::from_raw(input.circuit_state_id),
+            net_id: super::NetId::from_raw(input.circuit_state_id),
             wires: HashSet::new(),
         }
     }
@@ -134,7 +134,7 @@ impl From<&blotter::Input> for super::PegInfo {
 impl From<&super::PegInfo> for blotter::Output {
     fn from(peg: &super::PegInfo) -> Self {
         Self {
-            circuit_state_id: peg.cluster_id.into_raw(),
+            circuit_state_id: peg.net_id.into_raw(),
         }
     }
 }
@@ -142,7 +142,7 @@ impl From<&super::PegInfo> for blotter::Output {
 impl From<&blotter::Output> for super::PegInfo {
     fn from(input: &blotter::Output) -> Self {
         Self {
-            cluster_id: super::ClusterId::from_raw(input.circuit_state_id),
+            net_id: super::NetId::from_raw(input.circuit_state_id),
             wires: HashSet::new(),
         }
     }
@@ -153,7 +153,7 @@ impl From<&super::WireInfo> for blotter::Wire {
         Self {
             start_peg: wire.a.into(),
             end_peg: wire.b.into(),
-            circuit_state_id: wire.cluster_id.into_raw(),
+            circuit_state_id: wire.net_id.into_raw(),
             rotation: wire.rotation,
         }
     }
