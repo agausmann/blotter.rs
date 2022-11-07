@@ -192,7 +192,7 @@ impl Sandbox {
     }
 
     pub fn remove_wire(&mut self, id: WireId) {
-        // TODO Remove wire-cluster cross-reference. Remove cluster if empty.
+        // TODO Remove wire-cluster cross-reference.
 
         // TODO Remove wire.
 
