@@ -178,13 +178,67 @@ impl Sandbox {
     }
 
     pub fn remove_component(&mut self, id: ComponentId) {
-        // TODO Remove all wires connected to this component.
+        // Remove component.
+        let component = match self.components.remove(&id) {
+            Some(x) => x,
+            None => {
+                // If component doesn't exist, nothing needs to be done.
+                return;
+            }
+        };
 
-        // TODO Remove component.
+        // For each peg in the removed component:
+        let inputs = component.inputs.iter().enumerate().map(|(index, peg)| {
+            (
+                PegAddress {
+                    component: id,
+                    peg_type: PegType::Input,
+                    peg_index: index,
+                },
+                peg,
+            )
+        });
+        let outputs = component.outputs.iter().enumerate().map(|(index, peg)| {
+            (
+                PegAddress {
+                    component: id,
+                    peg_type: PegType::Output,
+                    peg_index: index,
+                },
+                peg,
+            )
+        });
+        for (peg_addr, peg) in inputs.chain(outputs) {
+            // Remove all wires connected to this peg.
+            for wire_id in &peg.wires {
+                // It is safe to call this here; it is designed to handle the
+                // case where one or more pegs do not exist.
+                self.remove_wire(*wire_id);
+            }
 
-        // TODO Remove peg-net cross-references. Remove nets if empty.
+            // Remove peg-net cross-references. Remove nets if empty.
+            let net = self.nets.get_mut(&peg.net_id).unwrap();
+            net.pegs.remove(&peg_addr);
+            if net.size() == 0 {
+                self.nets.remove(&peg.net_id);
+            }
+        }
 
-        todo!()
+        // Remove component-parent cross-references.
+        // If the parent does not exist, we may be a child of a just-deleted
+        // parent; ignore it.
+        if let Some(parent) = component
+            .parent
+            .and_then(|parent_id| self.components.get_mut(&parent_id))
+        {
+            parent.children.remove(&id);
+        }
+
+        // If the component has any children, remove them.
+        // TODO refactor this recursion?
+        for child in component.children {
+            self.remove_component(child)
+        }
     }
 
     pub fn remove_wire(&mut self, id: WireId) {
@@ -199,8 +253,14 @@ impl Sandbox {
 
         // Remove wire-net and wire-peg cross-references.
         self.nets.get_mut(&wire.net_id).unwrap().wires.remove(&id);
-        self.get_peg_mut(&wire.a).unwrap().wires.remove(&id);
-        self.get_peg_mut(&wire.b).unwrap().wires.remove(&id);
+        // The pegs might not exist if a component was just removed.
+        // That is expected and should not panic/error:
+        if let Some(peg) = self.get_peg_mut(&wire.a) {
+            peg.wires.remove(&id);
+        }
+        if let Some(peg) = self.get_peg_mut(&wire.b) {
+            peg.wires.remove(&id);
+        }
 
         // Split net if necessary.
         self.check_split(&wire.a, &wire.b);
@@ -257,6 +317,15 @@ impl Sandbox {
     }
 
     fn check_split(&mut self, addr_a: &PegAddress, addr_b: &PegAddress) {
+        if self.get_peg(addr_a).is_none() || self.get_peg(addr_b).is_none() {
+            // At least one of the pegs does not exist - nothing needs to be split.
+            //
+            // This can happen while a component is being removed; its pegs are
+            // also being removed and any wires connected to them, and so they
+            // will not need a new net.
+            return;
+        }
+
         // Traverse the whole net connected to addr_a.
         // If addr_b is in that set, then they are connected.
         // If not, a new net needs to be created.
