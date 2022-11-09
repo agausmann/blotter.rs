@@ -4,7 +4,10 @@ mod serialize;
 
 use crate::{
     latest::ModInfo,
-    misc::object_store::{Address, ObjectStore},
+    misc::{
+        dense_store::{DenseStore, Index},
+        object_store::{Address, ObjectStore},
+    },
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -16,9 +19,7 @@ pub struct Sandbox {
     root_components: HashSet<ComponentId>,
     components: ObjectStore<ComponentInfo>,
     wires: ObjectStore<WireInfo>,
-
-    next_net: u32,
-    nets: HashMap<NetId, NetInfo>,
+    nets: DenseStore<NetInfo>,
 
     next_type: u16,
     component_types: HashMap<String, u16>,
@@ -38,9 +39,7 @@ impl Sandbox {
             root_components: HashSet::new(),
             components: ObjectStore::new(),
             wires: ObjectStore::new(),
-
-            next_net: 0,
-            nets: HashMap::new(),
+            nets: DenseStore::new(),
 
             next_type: component_types.values().copied().max().unwrap_or(0),
             component_types,
@@ -164,7 +163,7 @@ impl Sandbox {
         // Register wire references in pegs and net.
         self.get_peg_mut(&addr_a).unwrap().wires.insert(wire_id);
         self.get_peg_mut(&addr_b).unwrap().wires.insert(wire_id);
-        self.nets.get_mut(&net_id).unwrap().wires.insert(wire_id);
+        self.nets.get_mut(net_id.0).unwrap().wires.insert(wire_id);
 
         Ok(wire_id)
     }
@@ -209,10 +208,10 @@ impl Sandbox {
             }
 
             // Remove peg-net cross-references. Remove nets if empty.
-            let net = self.nets.get_mut(&peg.net_id).unwrap();
+            let net = self.nets.get_mut(peg.net_id.0).unwrap();
             net.pegs.remove(&peg_addr);
             if net.size() == 0 {
-                self.nets.remove(&peg.net_id);
+                self.remove_net(peg.net_id);
             }
         }
 
@@ -244,7 +243,7 @@ impl Sandbox {
         };
 
         // Remove wire-net and wire-peg cross-references.
-        self.nets.get_mut(&wire.net_id).unwrap().wires.remove(&id);
+        self.nets.get_mut(wire.net_id.0).unwrap().wires.remove(&id);
         // The pegs might not exist if a component was just removed.
         // That is expected and should not panic/error:
         if let Some(peg) = self.get_peg_mut(&wire.a) {
@@ -271,9 +270,27 @@ impl Sandbox {
     }
 
     fn make_net(&mut self) -> NetId {
-        let id = NetId(self.next_net);
-        self.next_net += 1;
-        id
+        NetId(self.nets.insert(NetInfo {
+            wires: HashSet::new(),
+            pegs: HashSet::new(),
+        }))
+    }
+
+    fn remove_net(&mut self, net_id: NetId) -> Option<NetInfo> {
+        if let Some((net, rename)) = self.nets.remove(net_id.0) {
+            // Rename all the references to the net that was moved into this position.
+            let renamed = self.nets.get(rename.dest).unwrap();
+            for wire_id in &renamed.wires {
+                self.wires.get_mut(wire_id.0).unwrap().net_id = NetId(rename.dest);
+            }
+            //TODO remove this clone, reduce size of get_peg_mut borrow
+            for peg_id in &renamed.pegs.clone() {
+                self.get_peg_mut(peg_id).unwrap().net_id = NetId(rename.dest);
+            }
+            Some(net)
+        } else {
+            None
+        }
     }
 
     fn merge_nets(&mut self, id_a: NetId, id_b: NetId) -> NetId {
@@ -282,8 +299,8 @@ impl Sandbox {
             return id_a;
         }
 
-        let a = &self.nets[&id_a];
-        let b = &self.nets[&id_b];
+        let a = self.nets.get(id_a.0).unwrap();
+        let b = &self.nets.get(id_b.0).unwrap();
         // Merge the smaller net into the larger net.
         let (id_dest, id_src) = if a.size() >= b.size() {
             (id_a, id_b)
@@ -291,7 +308,7 @@ impl Sandbox {
             (id_b, id_a)
         };
 
-        let src = self.nets.remove(&id_src).unwrap();
+        let src = self.remove_net(id_src).unwrap();
         // Update net cross-references:
         for wire_id in &src.wires {
             self.wires.get_mut(wire_id.0).unwrap().net_id = id_dest;
@@ -301,7 +318,7 @@ impl Sandbox {
         }
 
         // Move references from src into dest:
-        let dest = self.nets.get_mut(&id_dest).unwrap();
+        let dest = self.nets.get_mut(id_dest.0).unwrap();
         dest.pegs.extend(src.pegs);
         dest.wires.extend(src.wires);
 
@@ -433,15 +450,15 @@ impl<'a> ComponentBuilder<'a> {
 pub struct ComponentId(Address<ComponentInfo>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NetId(u32);
+pub struct NetId(Index<NetInfo>);
 
 impl NetId {
     fn into_raw(self) -> i32 {
-        self.0.try_into().unwrap()
+        self.0.into_raw().try_into().unwrap()
     }
 
     fn from_raw(raw: i32) -> Self {
-        Self(raw.try_into().unwrap())
+        Self(Index::from_raw(raw.try_into().unwrap()))
     }
 }
 

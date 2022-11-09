@@ -29,9 +29,9 @@ impl<T> ObjectStore<T> {
         }
     }
 
-    pub fn contains(&self, address: Address<T>) -> bool {
-        self.get(address).is_some()
-    }
+    // pub fn contains(&self, address: Address<T>) -> bool {
+    //     self.get(address).is_some()
+    // }
 
     pub fn insert(&mut self, item: T) -> Address<T> {
         if let Some(entry) = self.entries.get_mut(self.first_vacant) {
@@ -91,12 +91,12 @@ impl<T> ObjectStore<T> {
             .flat_map(|(index, entry)| entry.get().map(|item| (Address::from_raw(index), item)))
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (Address<T>, &mut T)> {
-        self.entries
-            .iter_mut()
-            .enumerate()
-            .flat_map(|(index, entry)| entry.get_mut().map(|item| (Address::from_raw(index), item)))
-    }
+    // pub fn iter_mut(&mut self) -> impl Iterator<Item = (Address<T>, &mut T)> {
+    //     self.entries
+    //         .iter_mut()
+    //         .enumerate()
+    //         .flat_map(|(index, entry)| entry.get_mut().map(|item| (Address::from_raw(index), item)))
+    // }
 }
 
 enum Entry<T> {
