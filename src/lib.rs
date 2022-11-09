@@ -2,6 +2,7 @@ mod convert;
 pub mod custom_data;
 pub mod error;
 pub(crate) mod io;
+pub(crate) mod misc;
 pub mod sandbox;
 pub mod v5;
 pub mod v6;

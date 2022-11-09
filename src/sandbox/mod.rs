@@ -2,24 +2,27 @@
 
 mod serialize;
 
-use crate::latest::ModInfo;
+use crate::{
+    latest::ModInfo,
+    misc::object_store::{Address, ObjectStore},
+};
 use std::{
     collections::{HashMap, HashSet},
     iter::repeat_with,
-    num::NonZeroU32,
 };
 
 /// An in-memory representation of a Sandbox that is easy to modify.
 pub struct Sandbox {
-    next_component: u32,
-    next_net: u32,
-    next_wire: u32,
-    next_type: u16,
     root_components: HashSet<ComponentId>,
-    components: HashMap<ComponentId, ComponentInfo>,
-    wires: HashMap<WireId, WireInfo>,
+    components: ObjectStore<ComponentInfo>,
+    wires: ObjectStore<WireInfo>,
+
+    next_net: u32,
     nets: HashMap<NetId, NetInfo>,
+
+    next_type: u16,
     component_types: HashMap<String, u16>,
+
     mods: Vec<ModInfo>,
 }
 
@@ -32,15 +35,16 @@ impl Sandbox {
     /// Create an empty sandbox level with custom component-type / mod info.
     fn with_meta_info(component_types: HashMap<String, u16>, mods: Vec<ModInfo>) -> Self {
         Self {
-            next_component: 1,
-            next_net: 0,
-            next_wire: 0,
-            next_type: component_types.values().copied().max().unwrap_or(0),
             root_components: HashSet::new(),
-            components: HashMap::new(),
-            wires: HashMap::new(),
+            components: ObjectStore::new(),
+            wires: ObjectStore::new(),
+
+            next_net: 0,
             nets: HashMap::new(),
+
+            next_type: component_types.values().copied().max().unwrap_or(0),
             component_types,
+
             mods,
         }
     }
@@ -66,30 +70,23 @@ impl Sandbox {
             .collect(),
             custom_data: component.custom_data.clone(),
         };
-        let id = ComponentId(NonZeroU32::new(self.next_component).unwrap());
-        self.insert_component(id, info);
-        id
+        self.insert_component(info)
     }
 
-    /// Internal logic of `add_component` that is shared with savefile loading.
-    /// Savefiles store the component and net IDs, so they can be directly
-    /// passed instead of being allocated (as is done by `add_component`).
-    fn insert_component(&mut self, id: ComponentId, info: ComponentInfo) {
-        // TODO bubble this error (could be triggered by an invalid savefile).
-        assert!(!self.components.contains_key(&id));
-
-        // Update component ID allocator.
-        // TODO make this less sparse, 2 billion is not very much to work with
-        // over the lifetime of a world.
-        self.next_component = self.next_component.max(id.into_raw() + 1);
+    // Manually insert a generated component info.
+    // Used to efficiently insert data from a save file.
+    fn insert_component(&mut self, info: ComponentInfo) -> ComponentId {
+        // Add component info.
+        let parent_id = info.parent;
+        let id = ComponentId(self.components.insert(info));
 
         // Add parent-child cross-reference.
-        if let Some(parent) = info.parent {
+        if let Some(parent) = parent_id {
             // Valid savefiles will store and load the parent before the child,
             // so it is reasonable to assume the parent exists here.
             //TODO bubble this error; it should be recoverable in file loading.
             self.components
-                .get_mut(&parent)
+                .get_mut(parent.0)
                 .unwrap()
                 .children
                 .insert(id);
@@ -97,8 +94,7 @@ impl Sandbox {
             self.root_components.insert(id);
         }
 
-        // Add component info.
-        self.components.insert(id, info);
+        id
     }
 
     pub fn add_wire(
@@ -157,17 +153,13 @@ impl Sandbox {
         };
 
         // Create wire.
-        let wire_id = WireId(self.next_wire);
-        self.next_wire += 1;
-        self.wires.insert(
-            wire_id,
-            WireInfo {
-                a: addr_a,
-                b: addr_b,
-                net_id,
-                rotation,
-            },
-        );
+        let info = WireInfo {
+            a: addr_a,
+            b: addr_b,
+            net_id,
+            rotation,
+        };
+        let wire_id = WireId(self.wires.insert(info));
 
         // Register wire references in pegs and net.
         self.get_peg_mut(&addr_a).unwrap().wires.insert(wire_id);
@@ -179,7 +171,7 @@ impl Sandbox {
 
     pub fn remove_component(&mut self, id: ComponentId) {
         // Remove component.
-        let component = match self.components.remove(&id) {
+        let component = match self.components.remove(id.0) {
             Some(x) => x,
             None => {
                 // If component doesn't exist, nothing needs to be done.
@@ -229,7 +221,7 @@ impl Sandbox {
         // parent; ignore it.
         if let Some(parent) = component
             .parent
-            .and_then(|parent_id| self.components.get_mut(&parent_id))
+            .and_then(|parent_id| self.components.get_mut(parent_id.0))
         {
             parent.children.remove(&id);
         }
@@ -243,7 +235,7 @@ impl Sandbox {
 
     pub fn remove_wire(&mut self, id: WireId) {
         // Remove wire.
-        let wire = match self.wires.remove(&id) {
+        let wire = match self.wires.remove(id.0) {
             Some(x) => x,
             None => {
                 // If wire doesn't exist, nothing needs to be done.
@@ -302,7 +294,7 @@ impl Sandbox {
         let src = self.nets.remove(&id_src).unwrap();
         // Update net cross-references:
         for wire_id in &src.wires {
-            self.wires.get_mut(wire_id).unwrap().net_id = id_dest;
+            self.wires.get_mut(wire_id.0).unwrap().net_id = id_dest;
         }
         for peg_id in &src.pegs {
             self.get_peg_mut(peg_id).unwrap().net_id = id_dest;
@@ -338,7 +330,7 @@ impl Sandbox {
 
         while let Some(peg_addr) = frontier.pop() {
             for wire_id in &self.get_peg(&peg_addr).unwrap().wires {
-                let wire = &self.wires[wire_id];
+                let wire = self.wires.get(wire_id.0).unwrap();
                 let neighbor = if peg_addr == wire.a {
                     wire.b
                 } else if peg_addr == wire.b {
@@ -365,19 +357,19 @@ impl Sandbox {
             self.get_peg_mut(&peg_addr).unwrap().net_id = net_id;
         }
         for wire_id in visited_wires {
-            self.wires.get_mut(&wire_id).unwrap().net_id = net_id;
+            self.wires.get_mut(wire_id.0).unwrap().net_id = net_id;
         }
     }
 
     fn get_peg(&self, addr: &PegAddress) -> Option<&PegInfo> {
         self.components
-            .get(&addr.component)
+            .get(addr.component.0)
             .and_then(|component| component.get_peg(addr))
     }
 
     fn get_peg_mut(&mut self, addr: &PegAddress) -> Option<&mut PegInfo> {
         self.components
-            .get_mut(&addr.component)
+            .get_mut(addr.component.0)
             .and_then(|component| component.get_peg_mut(addr))
     }
 }
@@ -438,17 +430,7 @@ impl<'a> ComponentBuilder<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ComponentId(NonZeroU32);
-
-impl ComponentId {
-    fn into_raw(self) -> u32 {
-        self.0.into()
-    }
-
-    fn from_raw(raw: u32) -> Option<Self> {
-        NonZeroU32::new(raw).map(Self)
-    }
-}
+pub struct ComponentId(Address<ComponentInfo>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NetId(u32);
@@ -464,7 +446,7 @@ impl NetId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WireId(u32);
+pub struct WireId(Address<WireInfo>);
 
 #[derive(Debug)]
 pub enum AddWireError {
