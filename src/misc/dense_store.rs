@@ -13,6 +13,10 @@ impl<T> DenseStore<T> {
         Self { items: Vec::new() }
     }
 
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
     pub fn get(&self, index: Index<T>) -> Option<&T> {
         self.items.get(index.into_raw())
     }

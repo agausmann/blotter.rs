@@ -1,5 +1,7 @@
 //! Conversions between the Sandbox editor and Blotter serialization types.
 
+use bitvec::vec::BitVec;
+
 use crate::latest as blotter;
 use std::collections::{HashMap, HashSet};
 
@@ -101,6 +103,9 @@ impl From<&super::Sandbox> for blotter::BlotterFile {
             components.push(ser.serialize_component(component_id, component))
         }
 
+        let mut states = sandbox.net_states.clone();
+        states.set_uninitialized(false);
+
         Self {
             game_version: GAME_VERSION,
             save_type: blotter::SaveType::World,
@@ -120,7 +125,7 @@ impl From<&super::Sandbox> for blotter::BlotterFile {
                 .map(|(_id, wire)| ser.serialize_wire(wire))
                 .collect(),
             circuit_states: blotter::CircuitStates::WorldFormat {
-                circuit_states: vec![], //TODO
+                circuit_states: states.into_vec(),
             },
         }
     }
@@ -218,6 +223,19 @@ impl From<&blotter::BlotterFile> for super::Sandbox {
             file.mods.clone(),
         );
 
+        match &file.circuit_states {
+            blotter::CircuitStates::WorldFormat { circuit_states } => {
+                sandbox.net_states = BitVec::from_slice(circuit_states);
+                for _ in 0..8 * circuit_states.len() {
+                    sandbox.nets.insert(super::NetInfo {
+                        wires: HashSet::new(),
+                        pegs: HashSet::new(),
+                    });
+                }
+            }
+            _ => panic!("unsupported circuit state format"),
+        }
+
         for component in &file.components {
             let id = sandbox.insert_component(de.deserialize_component(component));
             de.register_component(component.address, id);
@@ -229,8 +247,6 @@ impl From<&blotter::BlotterFile> for super::Sandbox {
                 .insert_wire(info.a, info.b, info.rotation, Some(info.net_id))
                 .unwrap();
         }
-
-        //TODO load circuit states
 
         sandbox
     }

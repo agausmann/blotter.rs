@@ -2,6 +2,8 @@
 
 mod serialize;
 
+use bitvec::vec::BitVec;
+
 use crate::{
     latest::ModInfo,
     misc::{
@@ -20,6 +22,7 @@ pub struct Sandbox {
     components: ObjectStore<ComponentInfo>,
     wires: ObjectStore<WireInfo>,
     nets: DenseStore<NetInfo>,
+    net_states: BitVec<u8>,
 
     next_type: u16,
     component_types: HashMap<String, u16>,
@@ -40,6 +43,7 @@ impl Sandbox {
             components: ObjectStore::new(),
             wires: ObjectStore::new(),
             nets: DenseStore::new(),
+            net_states: BitVec::new(),
 
             next_type: component_types.values().copied().max().unwrap_or(0),
             component_types,
@@ -270,6 +274,9 @@ impl Sandbox {
     }
 
     fn make_net(&mut self) -> NetId {
+        assert_eq!(self.nets.len(), self.net_states.len());
+
+        self.net_states.push(false);
         NetId(self.nets.insert(NetInfo {
             wires: HashSet::new(),
             pegs: HashSet::new(),
@@ -287,6 +294,11 @@ impl Sandbox {
             for peg_id in &renamed.pegs.clone() {
                 self.get_peg_mut(peg_id).unwrap().net_id = NetId(rename.dest);
             }
+
+            // Perform the same swap-remove in net_states:
+            self.net_states.swap_remove(rename.dest.into_raw());
+
+            assert_eq!(self.nets.len(), self.net_states.len());
             Some(net)
         } else {
             None
