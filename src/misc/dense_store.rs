@@ -93,3 +93,12 @@ pub struct Rename<T> {
     pub src: Index<T>,
     pub dest: Index<T>,
 }
+
+impl<T> Debug for Rename<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Rename")
+            .field("src", &self.src)
+            .field("dest", &self.dest)
+            .finish()
+    }
+}
