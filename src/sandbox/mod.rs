@@ -80,11 +80,35 @@ impl Sandbox {
     // Used to efficiently insert data from a save file.
     fn insert_component(&mut self, info: ComponentInfo) -> ComponentId {
         // Add component info.
-        let parent_id = info.parent;
         let id = ComponentId(self.components.insert(info));
+        let info = self.components.get(id.0).unwrap();
+
+        // Add peg-net cross-references.
+        for (peg_index, peg_info) in info.inputs.iter().enumerate() {
+            self.nets
+                .get_mut(peg_info.net_id.0)
+                .unwrap()
+                .pegs
+                .insert(PegAddress {
+                    component: id,
+                    peg_type: PegType::Input,
+                    peg_index,
+                });
+        }
+        for (peg_index, peg_info) in info.outputs.iter().enumerate() {
+            self.nets
+                .get_mut(peg_info.net_id.0)
+                .unwrap()
+                .pegs
+                .insert(PegAddress {
+                    component: id,
+                    peg_type: PegType::Output,
+                    peg_index,
+                });
+        }
 
         // Add parent-child cross-reference.
-        if let Some(parent) = parent_id {
+        if let Some(parent) = info.parent {
             // Valid savefiles will store and load the parent before the child,
             // so it is reasonable to assume the parent exists here.
             //TODO bubble this error; it should be recoverable in file loading.
