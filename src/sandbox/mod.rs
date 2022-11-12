@@ -1,5 +1,6 @@
 //! High-level API for constructing and modifying a "Sandbox" / World.
 
+pub mod component;
 mod serialize;
 
 use bitvec::vec::BitVec;
