@@ -168,14 +168,31 @@ impl Sandbox {
                 // wire all have the same net.
 
                 //TODO bubble this error
-                assert!(id == peg_a.net_id && id == peg_b.net_id);
+                assert!(
+                    (addr_a.peg_type == PegType::Output || id == peg_b.net_id)
+                        && (addr_b.peg_type == PegType::Output || id == peg_a.net_id),
+                    "{:?}\n{:?} {:?}\n{:?} {:?}",
+                    id,
+                    peg_a.net_id,
+                    addr_a,
+                    peg_b.net_id,
+                    addr_b
+                );
 
                 id
             }
             None => {
-                // If no net ID is given (i.e. caller is `add_wire`), then
-                // obtain one from merging the two endpoints.
-                self.merge_nets(peg_a.net_id, peg_b.net_id)
+                // If no net ID is given (i.e. caller is `add_wire`), then:
+
+                // If one of the pegs is an output, use that peg's ID.
+                if addr_a.peg_type == PegType::Output {
+                    peg_a.net_id
+                } else if addr_b.peg_type == PegType::Output {
+                    peg_b.net_id
+                } else {
+                    // If both pegs are inputs, obtain one net from merging the two.
+                    self.merge_nets(peg_a.net_id, peg_b.net_id)
+                }
             }
         };
 
@@ -362,13 +379,26 @@ impl Sandbox {
     }
 
     fn check_split(&mut self, addr_a: &PegAddress, addr_b: &PegAddress) {
-        if self.get_peg(addr_a).is_none() || self.get_peg(addr_b).is_none() {
-            // At least one of the pegs does not exist - nothing needs to be split.
-            //
-            // This can happen while a component is being removed; its pegs are
-            // also being removed and any wires connected to them, and so they
-            // will not need a new net.
-            return;
+        match (self.get_peg(addr_a), self.get_peg(addr_b)) {
+            (None, _) | (_, None) => {
+                // At least one of the pegs does not exist - nothing needs to be
+                // split.
+                //
+                // This can happen while a component is being removed; its pegs
+                // are also being removed and any wires connected to them, and
+                // so they will not need a new net.
+                return;
+            }
+            (Some(peg_a), Some(peg_b)) if peg_a.net_id != peg_b.net_id => {
+                // The pegs do not have the same net ID. This happens when one
+                // of them is an output peg (however, they cannot _both_ be output pegs.
+                assert!(addr_a.peg_type != addr_b.peg_type);
+                // In this case, nothing needs to be split.
+                return;
+            }
+            _ => {
+                // In any other case, we need to split.
+            }
         }
 
         // Traverse the whole net connected to addr_a.
